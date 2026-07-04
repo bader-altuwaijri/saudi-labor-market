@@ -1,90 +1,91 @@
--- ============================================================
--- STAGING LAYER
--- Raw tables that mirror the source CSVs as closely as possible.
--- IMPORTANT: When you import each CSV via Supabase's Table Editor,
--- it will auto-create columns based on the file's actual headers.
--- These CREATE TABLE statements are a best-guess starting point —
--- replace/adjust once you see the real column names from the
--- downloaded files. Keeping raw data untouched here (no renaming,
--- no type coercion) protects the transform step below from breaking
--- if a future export has slightly different formatting.
--- ============================================================
+# Saudi Labor Market & Economic Analytics Dashboard
 
-create schema if not exists staging;
+Public BI portfolio project built on GASTAT data (sourced via the
+KAPSARC Data Portal), modeled in Supabase (Postgres) and visualized
+in Tableau Public.
 
--- Labour Force Participation Rate by gender, nationality, and region
-create table if not exists staging.raw_labor_force_participation (
-    region text,
-    year integer,
-    quarter integer,
-    gender text,
-    nationality text,
-    participation_rate numeric,
-    loaded_at timestamp default now()
-);
+## Data sources
 
--- Unemployment rate
-create table if not exists staging.raw_unemployment_rate (
-    region text,
-    year integer,
-    quarter integer,
-    gender text,
-    nationality text,
-    age_group text,
-    unemployment_rate numeric,
-    loaded_at timestamp default now()
-);
+| Dataset | Coverage | Source |
+|---|---|---|
+| Labor Force Survey Data | 2016–2025, quarterly | datasource.kapsarc.org |
+| GDP by Kind of Economic Activity, Current Prices | 2010–2025, quarterly | datasource.kapsarc.org |
+| Real GDP by Main Economic Activities (index) | 2010–2025, quarterly | datasource.kapsarc.org |
+| Real Estate Price Index by Sector & Type | 2014–2024, quarterly + annual | datasource.kapsarc.org |
 
--- Main Labor Market Indicators (employed persons, job seekers)
-create table if not exists staging.raw_labor_market_indicators (
-    year integer,
-    quarter integer,
-    indicator_name text,
-    nationality text,
-    value numeric,
-    unit text,
-    loaded_at timestamp default now()
-);
+All originally published by GASTAT (General Authority for Statistics,
+Saudi Arabia); KAPSARC republishes them in clean English CSV/API form.
 
--- GDP and National Accounts
-create table if not exists staging.raw_gdp_national_accounts (
-    year integer,
-    quarter integer,
-    economic_activity text,
-    gdp_current_prices numeric,
-    gdp_growth_rate numeric,
-    price_basis text,          -- e.g. 'real' vs 'nominal'
-    loaded_at timestamp default now()
-);
+**Analytical window**: dashboards standardize on **2017–2024**, the
+overlapping range across all four sources, for consistency even
+though some tables have wider raw coverage.
 
--- Consumer Price Index
-create table if not exists staging.raw_cpi (
-    year integer,
-    month integer,
-    category text,
-    cpi_value numeric,
-    annual_inflation_rate numeric,
-    loaded_at timestamp default now()
-);
+**Excluded**: "Main Labor Market Indicators" (also KAPSARC/GASTAT)
+was evaluated but dropped — its data stops at 2020 (stale relative
+to the other four) and its indicators substantially overlap with the
+richer Labor Force Survey Data file.
 
--- Real Estate Price Index
-create table if not exists staging.raw_real_estate_price_index (
-    region text,
-    year integer,
-    quarter integer,
-    property_type text,
-    price_index_value numeric,
-    yoy_change_pct numeric,
-    loaded_at timestamp default now()
-);
+## Architecture
 
--- 2022 Census-based population estimates
-create table if not exists staging.raw_population_census (
-    region text,
-    year integer,
-    gender text,
-    nationality text,
-    age_group text,
-    population_count bigint,
-    loaded_at timestamp default now()
-);
+```
+KAPSARC CSV downloads
+        │
+        ▼
+Supabase Postgres  ──►  staging.raw_* tables (exact source columns)
+        │
+        ▼
+   Transformation SQL (CTEs / joins) ──► star schema (analytics.dim_* / fact_*)
+        │
+        ▼
+   Export final tables as CSV
+        │
+        ▼
+   Tableau Public (published dashboard)
+```
+
+Tableau Public cannot hold a live connection to Postgres, so Supabase
+is the source of truth and modeling layer, and Tableau Public
+consumes a CSV export of the final star schema.
+
+## Schema design notes
+
+- **Domain-specific fact tables**: Labor Force, GDP, and Real Estate
+  each have genuinely different dimension shapes (e.g. Real Estate
+  has no region breakdown at all), so each gets its own fact table
+  rather than forcing everything into one generic table. All three
+  share `dim_time` so cross-domain analysis is still a simple join.
+- **GDP current vs. real merged**: both GDP source files have an
+  identical column shape, so they're merged into one `fact_gdp` table
+  distinguished by a `price_basis` ('current' / 'real') column,
+  rather than kept as two separate fact tables.
+- **EAV source pattern**: Labor Force Survey Data and both GDP files
+  are "long format" — a category column (`Indicator`, `Unit`, or
+  `Economic Activity`) determines what the numeric value in that row
+  actually represents, rather than each metric having its own column.
+  The transform layer resolves these into proper dimension tables.
+- **v1 scope**: the Labor Force Survey source has ~20 dimension
+  columns (job search method, occupation, educational specialization,
+  etc.), most only populated for specific indicators. This version
+  models the core dimensions (gender, nationality, age group, region,
+  time, indicator) and leaves the rest in staging, untouched —
+  straightforward to extend as a v2 migration later.
+
+## Setup steps
+
+1. Create a free Supabase project (done — see project "Saudi Labor Market").
+2. Push `supabase/migrations/` to GitHub — auto-deploys via the
+   Supabase GitHub integration.
+3. Import each source CSV into its matching `staging.raw_*` table via
+   Supabase's Table Editor. **Delimiter is semicolon (;), not comma**
+   for all five files.
+4. Run the transform migration (already included, runs automatically
+   after staging + star schema migrations via GitHub integration).
+5. Export each `analytics.dim_*` / `fact_*` table as CSV.
+6. Load those CSVs into Tableau Public and build the dashboard.
+
+## Refresh cadence
+
+GASTAT/KAPSARC update these on a rolling basis (quarterly for most).
+Re-running steps 3–5 periodically keeps the dashboard current;
+exact frequency is a manual decision since Tableau Public can't poll
+Supabase directly.
