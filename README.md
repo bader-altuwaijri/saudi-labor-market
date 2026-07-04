@@ -1,5 +1,7 @@
 # Saudi Labor Market & Economic Analytics Dashboard
 
+**Live dashboard**: https://public.tableau.com/views/SaudiArabiaMacroeconomicDashboard/Dashboard1
+
 Public BI portfolio project built on GASTAT data (sourced via the
 KAPSARC Data Portal), modeled in Supabase (Postgres) and visualized
 in Tableau Public.
@@ -43,6 +45,10 @@ Supabase Postgres  ──►  staging.raw_* tables (exact source columns)
    Tableau Public (published dashboard)
 ```
 
+Schema migrations are version-controlled in `supabase/migrations/`
+and deploy automatically via the Supabase GitHub integration on every
+push to `main`.
+
 Tableau Public cannot hold a live connection to Postgres, so Supabase
 is the source of truth and modeling layer, and Tableau Public
 consumes a CSV export of the final star schema.
@@ -70,6 +76,25 @@ consumes a CSV export of the final star schema.
   time, indicator) and leaves the rest in staging, untouched —
   straightforward to extend as a v2 migration later.
 
+## Known limitations
+
+- **Real Estate Price Index is a national aggregate**, with no
+  city/region breakdown in the source data. City-specific trends can
+  diverge significantly from the national figure — for example,
+  Riyadh saw documented apartment price increases of 17%+ during
+  2021 even while the national index remained comparatively flat,
+  driven by population growth and Vision 2030-related demand
+  concentrated in the capital. This is noted directly on the
+  published dashboard.
+- **2022 has sparse quarterly data** for some Labor Force indicators
+  in the source — the dashboard connects available data points
+  directly rather than interpolating, which can visually understate
+  the length of genuine reporting gaps.
+- Dashboards reflect the source data's publication vintage at time of
+  build; GASTAT/KAPSARC update most series quarterly, but the Tableau
+  Public dashboard requires manual re-export/re-publish to refresh
+  (see below).
+
 ## Setup steps
 
 1. Create a free Supabase project (done — see project "Saudi Labor Market").
@@ -78,8 +103,8 @@ consumes a CSV export of the final star schema.
 3. Import each source CSV into its matching `staging.raw_*` table via
    Supabase's Table Editor. **Delimiter is semicolon (;), not comma**
    for all five files.
-4. Run the transform migration (already included, runs automatically
-   after staging + star schema migrations via GitHub integration).
+4. Run the transform script (`03_transform.sql`) in the SQL Editor to
+   populate the star schema.
 5. Export each `analytics.dim_*` / `fact_*` table as CSV.
 6. Load those CSVs into Tableau Public and build the dashboard.
 
@@ -89,4 +114,3 @@ GASTAT/KAPSARC update these on a rolling basis (quarterly for most).
 Re-running steps 3–5 periodically keeps the dashboard current;
 exact frequency is a manual decision since Tableau Public can't poll
 Supabase directly.
-Schema deployed via Supabase migrations.
