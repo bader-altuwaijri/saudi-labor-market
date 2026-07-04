@@ -89,3 +89,4 @@ GASTAT/KAPSARC update these on a rolling basis (quarterly for most).
 Re-running steps 3–5 periodically keeps the dashboard current;
 exact frequency is a manual decision since Tableau Public can't poll
 Supabase directly.
+Schema deployed via Supabase migrations.
